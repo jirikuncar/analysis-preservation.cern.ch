@@ -26,6 +26,8 @@
 
 from __future__ import absolute_import, print_function
 
+import requests
+
 from flask import current_app
 
 from invenio_deposit.api import Deposit, preserve
@@ -52,7 +54,6 @@ class CAPDeposit(Deposit):
         """Check if deposit is published."""
         return self['_deposit'].get('pid') is not None
 
-
     @classmethod
     def get_record(cls, id_, with_deleted=False):
         """Get record instance."""
@@ -61,16 +62,36 @@ class CAPDeposit(Deposit):
         deposit['_files'] = deposit.files.dumps()
         return deposit
 
-
     @property
     def record_schema(self):
         """Convert deposit schema to a valid record schema."""
-        schema_path = current_jsonschemas.url_to_path(self['$schema'].replace('/app/schemas', '/schemas'))
+        schema_path = current_jsonschemas.url_to_path(
+            self['$schema'].replace('/app/schemas', '/schemas'))
         schema_prefix = current_app.config['DEPOSIT_JSONSCHEMAS_PREFIX']
         if schema_path and schema_path.startswith(schema_prefix):
             return current_jsonschemas.path_to_url(
                 schema_path[len(schema_prefix):]
             )
+
+    def commit(self, *args, **kwargs):
+
+        record = data = self
+
+        for main_measurement in data.get('main_measurements', []):
+            source = main_measurement.get('code_base', {}).get('source')
+            if source and source.get('preserved') and source.get('url'):
+                key = source.get('url').split('/')[-1]
+                main_measurement['code_base']['key'] = key
+                if key not in record.files:
+                    record.files[key] = requests.get(
+                        source.get('url'), stream=True).raw
+                    record.files[key]['source'] = source.get('url')
+                    # TODO record.files[key]['references'] = []
+                    main_measurement['code_base'][
+                        'version_id'] = str(record.files[key].version_id)
+
+        self.files.flush()
+        return super(CAPDeposit, self).commit(*args, **kwargs)
 
     @classmethod
     def create(cls, data, id_=None):
