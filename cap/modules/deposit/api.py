@@ -26,8 +26,6 @@
 
 from __future__ import absolute_import, print_function
 
-import requests
-
 from flask import current_app
 
 from invenio_deposit.api import Deposit, preserve
@@ -74,22 +72,7 @@ class CAPDeposit(Deposit):
             )
 
     def commit(self, *args, **kwargs):
-
-        record = data = self
-
-        for main_measurement in data.get('main_measurements', []):
-            source = main_measurement.get('code_base', {}).get('source')
-            if source and source.get('preserved') and source.get('url'):
-                key = source.get('url').split('/')[-1]
-                main_measurement['code_base']['key'] = key
-                if key not in record.files:
-                    record.files[key] = requests.get(
-                        source.get('url'), stream=True).raw
-                    record.files[key]['source'] = source.get('url')
-                    # TODO record.files[key]['references'] = []
-                    main_measurement['code_base'][
-                        'version_id'] = str(record.files[key].version_id)
-
+        """Synchronize files before commit."""
         self.files.flush()
         return super(CAPDeposit, self).commit(*args, **kwargs)
 
@@ -102,7 +85,6 @@ class CAPDeposit(Deposit):
         bucket = Bucket.create(
             default_location=Location.get_default()
         )
-        data['_buckets'] = {'deposit': str(bucket.id)}
         deposit = super(CAPDeposit, cls).create(data, id_=id_)
         RecordsBuckets.create(record=deposit.model, bucket=bucket)
         return deposit
